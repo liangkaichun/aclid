@@ -3,9 +3,12 @@
 #
 #   AC power:      pmset disablesleep 1   (lid close keeps the system running)
 #   battery power: pmset disablesleep 0   (system sleeps as normal)
+#   lid closed on AC: pmset displaysleepnow (display off immediately, system stays up)
 #
-# Not polled: `pmset -g pslog` is an event stream that emits a line on every
-# power-source change; it is used only as the trigger to re-apply the state.
+# Two event streams, no polling:
+#   - `pmset -g pslog`  power-source change events -> re-apply disablesleep
+#   - `log stream` (ContinuityCaptureAgent "Clamshell closed status changed"
+#     lines) lid-close events -> pmset displaysleepnow
 
 set -euo pipefail
 
@@ -29,12 +32,34 @@ apply_state() {
   echo "aclid: on $src -> SleepDisabled=$(pmset -g | awk '/SleepDisabled/{print $2}')"
 }
 
+# 0->1 == lid closed; 1->0 == lid opened
+lid_watcher() {
+  while true; do
+    log stream --style compact \
+      --predicate 'process == "ContinuityCaptureAgent" AND eventMessage CONTAINS[c] "Clamshell"' 2>/dev/null \
+      | while IFS= read -r line; do
+          case "$line" in
+            *"Clamshell closed status changed from 0 to 1"*)
+              # only matters when the system is being kept awake (AC mode)
+              if [ "$(pmset -g | awk '/SleepDisabled/{print $2}')" = "1" ]; then
+                echo "aclid: lid closed, system awake -> displaysleepnow"
+                pmset displaysleepnow
+              fi
+              ;;
+          esac
+        done
+    sleep 2   # restart the stream if it ever exits
+  done
+}
+
 case "${1:-}" in
   run)
     apply_state   # set the correct state immediately (covers boot)
+    lid_watcher &
+    lidwatch=$!
+    trap 'kill "$lidwatch" 2>/dev/null' TERM INT
     while true; do
-      # blocks until the next power-source change, then apply_state runs
-      pmset -g pslog | while read -r _; do apply_state; done
+      pmset -g pslog | while IFS= read -r _; do apply_state; done
       sleep 2      # if pslog ever exits, restart it
     done
     ;;
