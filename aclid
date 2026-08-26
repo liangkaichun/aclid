@@ -1,0 +1,56 @@
+#!/bin/bash
+# aclid — stay awake with the lid closed on AC, sleep normally on battery.
+#
+#   AC power:      pmset disablesleep 1   (lid close keeps the system running)
+#   battery power: pmset disablesleep 0   (system sleeps as normal)
+#
+# Not polled: `pmset -g pslog` is an event stream that emits a line on every
+# power-source change; it is used only as the trigger to re-apply the state.
+
+set -euo pipefail
+
+apply_state() {
+  local line src
+  line="$(pmset -g ps | head -1)"
+  case "$line" in
+    *"'AC Power'"*)
+      src="AC"
+      pmset disablesleep 1
+      ;;
+    *"'Battery Power'"*)
+      src="battery"
+      pmset disablesleep 0
+      ;;
+    *)
+      echo "aclid: unrecognized power source line: $line" >&2
+      return 1
+      ;;
+  esac
+  echo "aclid: on $src -> SleepDisabled=$(pmset -g | awk '/SleepDisabled/{print $2}')"
+}
+
+case "${1:-}" in
+  run)
+    apply_state   # set the correct state immediately (covers boot)
+    while true; do
+      # blocks until the next power-source change, then apply_state runs
+      pmset -g pslog | while read -r _; do apply_state; done
+      sleep 2      # if pslog ever exits, restart it
+    done
+    ;;
+  status)
+    pmset -g ps | head -1
+    pmset -g | grep -i SleepDisabled
+    ;;
+  *)
+    cat <<'USAGE'
+aclid — stay awake with lid closed on AC, sleep normally on battery
+
+  aclid run      daemon mode (run by launchd as root)
+  aclid status   show power source and SleepDisabled state
+
+Installed as a LaunchDaemon; managed with launchctl. Install/uninstall:
+see README.md in this file's source directory.
+USAGE
+    exit 2 ;;
+esac
