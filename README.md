@@ -17,6 +17,8 @@ macOS LaunchDaemon，监听电源事件 + 合盖事件，按需切换 `pmset` �
 
 ## 安装
 
+### 安装工具：aclid-manager.app.zip，macos原生应用，下载后修改去掉.zip扩展名，直接运行。
+
 以下命令同时适用于**全新安装**和**重装**（`bootout 2>/dev/null` 在未加载过时静默跳过，已加载时先卸载）：
 
 ```bash
